@@ -127,6 +127,7 @@ class VideoAccessGrant {
     required this.sessionId,
     required this.role,
     required this.capabilities,
+    this.serverUrl,
     this.token,
     this.expiresAt,
     this.denialReason,
@@ -136,6 +137,7 @@ class VideoAccessGrant {
   final String sessionId;
   final String role;
   final VideoCapabilitySet capabilities;
+  final String? serverUrl;
   final String? token;
   final String? expiresAt;
   final String? denialReason;
@@ -148,6 +150,7 @@ class VideoAccessGrant {
       capabilities: VideoCapabilitySet.fromJson(
         json['capabilities'] as Map<String, dynamic>,
       ),
+      serverUrl: json['serverUrl'] as String?,
       token: json['token'] as String?,
       expiresAt: json['expiresAt'] as String?,
       denialReason: json['denialReason'] as String?,

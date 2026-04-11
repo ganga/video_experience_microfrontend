@@ -25,4 +25,24 @@ void main() {
     expect(session.title, 'Fractions Live Class');
     expect(session.roomMode, 'lecture');
   });
+
+  test('video access grant parses self-hosted livekit fields', () {
+    final grant = VideoAccessGrant.fromJson(const {
+      'allowed': true,
+      'sessionId': 'session-1',
+      'role': 'host',
+      'serverUrl': 'ws://localhost:7880',
+      'token': 'a.b.c',
+      'capabilities': {
+        'publishAudio': true,
+        'publishVideo': true,
+        'publishScreenShare': false,
+        'subscribe': true,
+        'manageRecording': true,
+      },
+    });
+
+    expect(grant.serverUrl, 'ws://localhost:7880');
+    expect(grant.token, 'a.b.c');
+  });
 }
