@@ -21,6 +21,17 @@ class LiveSessionScreen extends StatefulWidget {
 }
 
 class _LiveSessionScreenState extends State<LiveSessionScreen> {
+  static const int _maxVisibleRemoteTiles = 6;
+  static const CameraCaptureOptions _studentCameraOptions =
+      CameraCaptureOptions(
+    maxFrameRate: 15,
+    params: VideoParametersPresets.h360_169,
+  );
+  static const CameraCaptureOptions _hostCameraOptions = CameraCaptureOptions(
+    maxFrameRate: 24,
+    params: VideoParametersPresets.h540_169,
+  );
+
   late final Room _room;
   bool _connecting = true;
   bool _connected = false;
@@ -46,7 +57,10 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
     final serverUrl = widget.accessGrant.serverUrl;
     final token = widget.accessGrant.token;
 
-    if (serverUrl == null || serverUrl.isEmpty || token == null || token.isEmpty) {
+    if (serverUrl == null ||
+        serverUrl.isEmpty ||
+        token == null ||
+        token.isEmpty) {
       setState(() {
         _connecting = false;
         _error = 'Missing LiveKit server URL or access token.';
@@ -58,14 +72,28 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
       await _room.connect(
         serverUrl,
         token,
-        roomOptions: const RoomOptions(
+        connectOptions: const ConnectOptions(
+          autoSubscribe: false,
+        ),
+        roomOptions: RoomOptions(
           adaptiveStream: true,
           dynacast: true,
+          defaultCameraCaptureOptions: _cameraOptionsForRole(),
+          defaultVideoPublishOptions: const VideoPublishOptions(
+            simulcast: true,
+            videoSimulcastLayers: [
+              VideoParametersPresets.h180_169,
+              VideoParametersPresets.h360_169,
+            ],
+          ),
         ),
       );
 
       if (widget.accessGrant.capabilities.publishVideo) {
-        await _room.localParticipant?.setCameraEnabled(true);
+        await _room.localParticipant?.setCameraEnabled(
+          true,
+          cameraCaptureOptions: _cameraOptionsForRole(),
+        );
         _cameraEnabled = true;
       }
       if (widget.accessGrant.capabilities.publishAudio) {
@@ -81,6 +109,7 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
         _connected = true;
         _error = null;
       });
+      unawaited(_applyVideoSubscriptionPolicy());
     } catch (error) {
       if (!mounted) {
         return;
@@ -96,7 +125,10 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
   Future<void> _toggleCamera() async {
     final nextValue = !_cameraEnabled;
     try {
-      await _room.localParticipant?.setCameraEnabled(nextValue);
+      await _room.localParticipant?.setCameraEnabled(
+        nextValue,
+        cameraCaptureOptions: _cameraOptionsForRole(),
+      );
       if (!mounted) {
         return;
       }
@@ -106,6 +138,61 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
     } catch (error) {
       _showError(error);
     }
+  }
+
+  CameraCaptureOptions _cameraOptionsForRole() {
+    return widget.accessGrant.role == 'host'
+        ? _hostCameraOptions
+        : _studentCameraOptions;
+  }
+
+  Future<void> _applyVideoSubscriptionPolicy() async {
+    final visibleParticipants = _visibleRemoteParticipants();
+    final visibleIds =
+        visibleParticipants.map((participant) => participant.sid).toSet();
+
+    for (final participant in _room.remoteParticipants.values) {
+      for (final publication in participant.audioTrackPublications) {
+        await publication.subscribe();
+      }
+
+      final shouldSubscribe = visibleIds.contains(participant.sid);
+      for (final publication in participant.videoTrackPublications) {
+        if (shouldSubscribe) {
+          await publication.subscribe();
+        } else {
+          await publication.unsubscribe();
+        }
+      }
+    }
+  }
+
+  List<RemoteParticipant> _visibleRemoteParticipants() {
+    final participants = _room.remoteParticipants.values.toList();
+    participants.sort((left, right) {
+      final leftRank = _participantPriority(left);
+      final rightRank = _participantPriority(right);
+      if (leftRank != rightRank) {
+        return rightRank.compareTo(leftRank);
+      }
+      return left.joinedAt.compareTo(right.joinedAt);
+    });
+    return participants.take(_maxVisibleRemoteTiles).toList();
+  }
+
+  int _participantPriority(RemoteParticipant participant) {
+    final metadata = participant.metadata?.toLowerCase() ?? '';
+    var score = 0;
+    if (metadata.contains('"role":"host"')) {
+      score += 100;
+    }
+    if (!participant.isMuted) {
+      score += 10;
+    }
+    if (participant.hasVideo) {
+      score += 1;
+    }
+    return score;
   }
 
   Future<void> _toggleMicrophone() async {
@@ -146,10 +233,17 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
       animation: _room,
       builder: (context, _) {
         final remoteParticipants = _room.remoteParticipants.values.toList();
+        final visibleRemoteParticipants = _visibleRemoteParticipants();
+        unawaited(_applyVideoSubscriptionPolicy());
         final localVideoTrack = _firstVideoTrack(_room.localParticipant);
-        final remoteVideoTracks = remoteParticipants
-            .map(_firstVideoTrack)
-            .whereType<VideoTrack>()
+        final remoteVideoTracks = visibleRemoteParticipants
+            .map(
+              (participant) => _ParticipantVideoTrack(
+                participant: participant,
+                track: _firstVideoTrack(participant),
+              ),
+            )
+            .where((item) => item.track != null)
             .toList();
 
         return Scaffold(
@@ -157,14 +251,16 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
             title: Text(widget.session.title),
             actions: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: DecoratedBox(
                   decoration: const BoxDecoration(
                     color: VideoExperienceTheme.danger,
                     borderRadius: BorderRadius.all(Radius.circular(999)),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     child: Text(
                       _recordingBadgeText(),
                       style: const TextStyle(color: Colors.white),
@@ -188,9 +284,10 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
                         Expanded(
                           child: FilledButton.tonal(
                             key: const Key('video.toggleMic'),
-                            onPressed: widget.accessGrant.capabilities.publishAudio
-                                ? _toggleMicrophone
-                                : null,
+                            onPressed:
+                                widget.accessGrant.capabilities.publishAudio
+                                    ? _toggleMicrophone
+                                    : null,
                             child: Text(_microphoneEnabled ? 'Mute' : 'Unmute'),
                           ),
                         ),
@@ -198,10 +295,12 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
                         Expanded(
                           child: FilledButton.tonal(
                             key: const Key('video.toggleCamera'),
-                            onPressed: widget.accessGrant.capabilities.publishVideo
-                                ? _toggleCamera
-                                : null,
-                            child: Text(_cameraEnabled ? 'Camera Off' : 'Camera On'),
+                            onPressed:
+                                widget.accessGrant.capabilities.publishVideo
+                                    ? _toggleCamera
+                                    : null,
+                            child: Text(
+                                _cameraEnabled ? 'Camera Off' : 'Camera On'),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -227,7 +326,7 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
 
   Widget _buildBody({
     required VideoTrack? localVideoTrack,
-    required List<VideoTrack> remoteVideoTracks,
+    required List<_ParticipantVideoTrack> remoteVideoTracks,
     required List<RemoteParticipant> remoteParticipants,
   }) {
     if (_connecting) {
@@ -241,7 +340,8 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 32, color: VideoExperienceTheme.danger),
+              const Icon(Icons.error_outline,
+                  size: 32, color: VideoExperienceTheme.danger),
               const SizedBox(height: 12),
               Text(
                 'Live session could not connect',
@@ -269,7 +369,8 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
         ),
         const SizedBox(height: 16),
         if (localVideoTrack != null) ...[
-          const Text('Your camera', style: TextStyle(fontWeight: FontWeight.w700)),
+          const Text('Your camera',
+              style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           _TrackTile(
             title: 'You',
@@ -278,7 +379,8 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
           ),
           const SizedBox(height: 16),
         ],
-        const Text('Participants', style: TextStyle(fontWeight: FontWeight.w700)),
+        const Text('Participants',
+            style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         if (remoteVideoTracks.isEmpty)
           const _EmptyRemoteState()
@@ -288,8 +390,10 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
               padding: const EdgeInsets.only(bottom: 12),
               child: _TrackTile(
                 title: 'Remote participant',
-                subtitle: 'Subscribed video',
-                track: track,
+                subtitle: track.participant.isMuted
+                    ? 'Student video'
+                    : 'Active speaker',
+                track: track.track!,
               ),
             ),
           ),
@@ -298,7 +402,9 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
   }
 
   String _recordingBadgeText() {
-    return widget.session.recordingPolicy == 'off' ? 'Not Recording' : 'Recording';
+    return widget.session.recordingPolicy == 'off'
+        ? 'Not Recording'
+        : 'Recording';
   }
 
   VideoTrack? _firstVideoTrack(Participant? participant) {
@@ -314,6 +420,16 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
     }
     return null;
   }
+}
+
+class _ParticipantVideoTrack {
+  const _ParticipantVideoTrack({
+    required this.participant,
+    required this.track,
+  });
+
+  final RemoteParticipant participant;
+  final VideoTrack? track;
 }
 
 class _SessionSummaryCard extends StatelessWidget {
@@ -382,7 +498,9 @@ class _TrackTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 4),
                   Text(subtitle, style: const TextStyle(color: Colors.white70)),
                 ],
