@@ -218,6 +218,22 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
     Navigator.of(context).pop();
   }
 
+  void _openFullscreen({
+    required VideoTrack track,
+    required String title,
+    required String? subtitle,
+  }) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _FullscreenVideoView(
+          title: title,
+          subtitle: subtitle,
+          track: track,
+        ),
+      ),
+    );
+  }
+
   void _showError(Object error) {
     if (!mounted) {
       return;
@@ -240,6 +256,8 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
             .map(
               (participant) => _ParticipantVideoTrack(
                 participant: participant,
+                subtitle:
+                    participant.isMuted ? 'Student video' : 'Active speaker',
                 track: _firstVideoTrack(participant),
               ),
             )
@@ -278,41 +296,38 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
           bottomNavigationBar: _connected
               ? SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                     child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Expanded(
-                          child: FilledButton.tonal(
-                            key: const Key('video.toggleMic'),
-                            onPressed:
-                                widget.accessGrant.capabilities.publishAudio
-                                    ? _toggleMicrophone
-                                    : null,
-                            child: Text(_microphoneEnabled ? 'Mute' : 'Unmute'),
-                          ),
+                        _ControlButton(
+                          key: const Key('video.toggleMic'),
+                          icon: _microphoneEnabled ? Icons.mic : Icons.mic_off,
+                          label: _microphoneEnabled ? 'Mute' : 'Unmute',
+                          onPressed:
+                              widget.accessGrant.capabilities.publishAudio
+                                  ? _toggleMicrophone
+                                  : null,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton.tonal(
-                            key: const Key('video.toggleCamera'),
-                            onPressed:
-                                widget.accessGrant.capabilities.publishVideo
-                                    ? _toggleCamera
-                                    : null,
-                            child: Text(
-                                _cameraEnabled ? 'Camera Off' : 'Camera On'),
-                          ),
+                        const SizedBox(width: 16),
+                        _ControlButton(
+                          key: const Key('video.toggleCamera'),
+                          icon: _cameraEnabled
+                              ? Icons.videocam
+                              : Icons.videocam_off,
+                          label: _cameraEnabled ? 'Camera Off' : 'Camera On',
+                          onPressed:
+                              widget.accessGrant.capabilities.publishVideo
+                                  ? _toggleCamera
+                                  : null,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            key: const Key('video.leave'),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: VideoExperienceTheme.danger,
-                            ),
-                            onPressed: _leaveSession,
-                            child: const Text('Leave'),
-                          ),
+                        const SizedBox(width: 16),
+                        _ControlButton(
+                          key: const Key('video.leave'),
+                          icon: Icons.call_end,
+                          label: 'Leave',
+                          danger: true,
+                          onPressed: _leaveSession,
                         ),
                       ],
                     ),
@@ -358,46 +373,54 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
       );
     }
 
-    return ListView(
+    final primaryTrack = remoteVideoTracks.isNotEmpty
+        ? remoteVideoTracks.first
+        : localVideoTrack == null
+            ? null
+            : _ParticipantVideoTrack(
+                title: 'You',
+                subtitle: widget.accessGrant.role,
+                track: localVideoTrack,
+              );
+
+    return Padding(
       padding: const EdgeInsets.all(16),
-      children: [
-        _SessionSummaryCard(
-          role: widget.accessGrant.role,
-          connectionState: _room.connectionState.name,
-          roomName: widget.session.roomName,
-          participantCount: remoteParticipants.length + (_connected ? 1 : 0),
-        ),
-        const SizedBox(height: 16),
-        if (localVideoTrack != null) ...[
-          const Text('Your camera',
-              style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          _TrackTile(
-            title: 'You',
-            subtitle: widget.accessGrant.role,
-            track: localVideoTrack,
+      child: Column(
+        children: [
+          _SessionSummaryCard(
+            role: widget.accessGrant.role,
+            connectionState: _room.connectionState.name,
+            roomName: widget.session.roomName,
+            participantCount: remoteParticipants.length + (_connected ? 1 : 0),
           ),
-          const SizedBox(height: 16),
-        ],
-        const Text('Participants',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        if (remoteVideoTracks.isEmpty)
-          const _EmptyRemoteState()
-        else
-          ...remoteVideoTracks.map(
-            (track) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _TrackTile(
-                title: 'Remote participant',
-                subtitle: track.participant.isMuted
-                    ? 'Student video'
-                    : 'Active speaker',
-                track: track.track!,
-              ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: primaryTrack == null || primaryTrack.track == null
+                ? const _EmptyVideoStage()
+                : _VideoStage(
+                    title: primaryTrack.title,
+                    subtitle: primaryTrack.subtitle,
+                    track: primaryTrack.track!,
+                    onFullscreen: () => _openFullscreen(
+                      title: primaryTrack.title,
+                      subtitle: primaryTrack.subtitle,
+                      track: primaryTrack.track!,
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 104,
+            child: _ThumbnailStrip(
+              localVideoTrack: localVideoTrack,
+              remoteVideoTracks: remoteVideoTracks,
+              currentTrack: primaryTrack?.track,
+              localRole: widget.accessGrant.role,
+              onOpenFullscreen: _openFullscreen,
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -424,12 +447,57 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
 
 class _ParticipantVideoTrack {
   const _ParticipantVideoTrack({
-    required this.participant,
     required this.track,
+    this.participant,
+    this.title = 'Remote participant',
+    this.subtitle,
   });
 
-  final RemoteParticipant participant;
+  final RemoteParticipant? participant;
   final VideoTrack? track;
+
+  final String title;
+  final String? subtitle;
+}
+
+class _ControlButton extends StatelessWidget {
+  const _ControlButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = danger
+        ? VideoExperienceTheme.danger
+        : Theme.of(context).colorScheme.secondaryContainer;
+    final foreground = danger
+        ? Colors.white
+        : Theme.of(context).colorScheme.onSecondaryContainer;
+
+    return Tooltip(
+      message: label,
+      child: IconButton.filled(
+        icon: Icon(icon),
+        color: foreground,
+        style: IconButton.styleFrom(
+          backgroundColor: background,
+          disabledBackgroundColor: VideoExperienceTheme.border,
+          disabledForegroundColor: VideoExperienceTheme.muted,
+          fixedSize: const Size.square(52),
+        ),
+        onPressed: onPressed,
+      ),
+    );
+  }
 }
 
 class _SessionSummaryCard extends StatelessWidget {
@@ -449,16 +517,23 @@ class _SessionSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
           children: [
-            Text('Role: $role'),
-            const SizedBox(height: 4),
-            Text('Connection: $connectionState'),
-            const SizedBox(height: 4),
-            Text('Room: $roomName'),
-            const SizedBox(height: 4),
+            Expanded(
+              child: Text(
+                'Role: $role',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Connection: $connectionState',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 12),
             Text('Participants: $participantCount'),
           ],
         ),
@@ -467,46 +542,265 @@ class _SessionSummaryCard extends StatelessWidget {
   }
 }
 
-class _TrackTile extends StatelessWidget {
-  const _TrackTile({
+class _VideoStage extends StatelessWidget {
+  const _VideoStage({
+    required this.title,
+    required this.subtitle,
+    required this.track,
+    required this.onFullscreen,
+  });
+
+  final String title;
+  final String? subtitle;
+  final VideoTrack track;
+  final VoidCallback onFullscreen;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: VideoTrackRenderer(track),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              right: 72,
+              bottom: 12,
+              child: _VideoLabel(title: title, subtitle: subtitle),
+            ),
+            Positioned(
+              top: 12,
+              right: 12,
+              child: IconButton.filledTonal(
+                tooltip: 'Full screen',
+                icon: const Icon(Icons.fullscreen),
+                onPressed: onFullscreen,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ThumbnailStrip extends StatelessWidget {
+  const _ThumbnailStrip({
+    required this.localVideoTrack,
+    required this.remoteVideoTracks,
+    required this.currentTrack,
+    required this.localRole,
+    required this.onOpenFullscreen,
+  });
+
+  final VideoTrack? localVideoTrack;
+  final List<_ParticipantVideoTrack> remoteVideoTracks;
+  final VideoTrack? currentTrack;
+  final String localRole;
+  final void Function({
+    required VideoTrack track,
+    required String title,
+    required String? subtitle,
+  }) onOpenFullscreen;
+
+  @override
+  Widget build(BuildContext context) {
+    final tiles = <_ParticipantVideoTrack>[
+      if (localVideoTrack != null)
+        _ParticipantVideoTrack(
+          title: 'You',
+          subtitle: localRole,
+          track: localVideoTrack,
+        ),
+      ...remoteVideoTracks,
+    ];
+
+    if (tiles.isEmpty) {
+      return const _EmptyRemoteState();
+    }
+
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: tiles.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 10),
+      itemBuilder: (context, index) {
+        final tile = tiles[index];
+        final track = tile.track;
+        if (track == null) {
+          return const SizedBox.shrink();
+        }
+        return _TrackThumbnail(
+          title: tile.title,
+          subtitle: tile.subtitle,
+          track: track,
+          selected: identical(track, currentTrack),
+          onTap: () => onOpenFullscreen(
+            title: tile.title,
+            subtitle: tile.subtitle,
+            track: track,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TrackThumbnail extends StatelessWidget {
+  const _TrackThumbnail({
+    required this.title,
+    required this.subtitle,
+    required this.track,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String? subtitle;
+  final VideoTrack track;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 168,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? VideoExperienceTheme.primary
+                  : VideoExperienceTheme.border,
+              width: selected ? 3 : 1,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: ColoredBox(
+              color: Colors.black,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  VideoTrackRenderer(track),
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: 8,
+                    child: _VideoLabel(title: title, subtitle: subtitle),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoLabel extends StatelessWidget {
+  const _VideoLabel({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.62),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          subtitle == null || subtitle!.isEmpty ? title : '$title • $subtitle',
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FullscreenVideoView extends StatelessWidget {
+  const _FullscreenVideoView({
     required this.title,
     required this.subtitle,
     required this.track,
   });
 
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final VideoTrack track;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: ColoredBox(
-        color: Colors.black,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: VideoTrackRenderer(
-                track,
+            Center(
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: VideoTrackRenderer(track),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(color: Colors.white70)),
-                ],
+            Positioned(
+              left: 16,
+              right: 80,
+              bottom: 16,
+              child: _VideoLabel(title: title, subtitle: subtitle),
+            ),
+            Positioned(
+              top: 16,
+              right: 16,
+              child: IconButton.filledTonal(
+                tooltip: 'Exit full screen',
+                icon: const Icon(Icons.fullscreen_exit),
+                onPressed: () => Navigator.of(context).pop(),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyVideoStage extends StatelessWidget {
+  const _EmptyVideoStage();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: const ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Text(
+            'Waiting for video...',
+            style: TextStyle(color: Colors.white70),
+          ),
         ),
       ),
     );
