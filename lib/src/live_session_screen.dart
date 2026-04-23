@@ -272,9 +272,9 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    color: VideoExperienceTheme.danger,
-                    borderRadius: BorderRadius.all(Radius.circular(999)),
+                  decoration: BoxDecoration(
+                    color: _recordingBadgeColor(),
+                    borderRadius: const BorderRadius.all(Radius.circular(999)),
                   ),
                   child: Padding(
                     padding:
@@ -425,9 +425,37 @@ class _LiveSessionScreenState extends State<LiveSessionScreen> {
   }
 
   String _recordingBadgeText() {
-    return widget.session.recordingPolicy == 'off'
-        ? 'Not Recording'
-        : 'Recording';
+    if (widget.session.recordingPolicy == 'off') {
+      return 'Not Recording';
+    }
+    switch (widget.session.status) {
+      case 'live':
+        return 'Recording Active';
+      case 'recording_processing':
+        return 'Recording Processing';
+      case 'recording_available':
+      case 'ended':
+        return 'Recording Available';
+      default:
+        return 'Recording Enabled';
+    }
+  }
+
+  Color _recordingBadgeColor() {
+    if (widget.session.recordingPolicy == 'off') {
+      return VideoExperienceTheme.muted;
+    }
+    switch (widget.session.status) {
+      case 'live':
+        return VideoExperienceTheme.danger;
+      case 'recording_processing':
+        return const Color(0xFFB54708);
+      case 'recording_available':
+      case 'ended':
+        return VideoExperienceTheme.primary;
+      default:
+        return VideoExperienceTheme.muted;
+    }
   }
 
   VideoTrack? _firstVideoTrack(Participant? participant) {
